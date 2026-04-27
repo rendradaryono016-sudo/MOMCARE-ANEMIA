@@ -43,11 +43,35 @@ const foodData = [
 ];
 
 function getSupabaseConfig() {
-  if (window.__SUPABASE_CONFIG__) return window.__SUPABASE_CONFIG__;
-  return {
+  const fromWindow = window.__SUPABASE_CONFIG__ || {
     url: window.SUPABASE_URL || "",
     anonKey: window.SUPABASE_ANON_KEY || ""
   };
+  const rawUrl = String(fromWindow.url || "").trim();
+  const rawAnonKey = String(fromWindow.anonKey || "").trim();
+  const normalizedUrl = rawUrl.replace(/\/rest\/v1\/?$/i, "");
+  return {
+    url: normalizedUrl,
+    anonKey: rawAnonKey
+  };
+}
+
+function getFriendlySupabaseError(error, fallbackText) {
+  const rawMessage = error && error.message ? String(error.message) : "";
+  const lower = rawMessage.toLowerCase();
+  let hint = "";
+  if (lower.includes("relation") && lower.includes("does not exist")) {
+    hint = " Tabel database belum ada. Jalankan file supabase-schema.sql di SQL Editor Supabase.";
+  } else if (lower.includes("invalid api key") || lower.includes("jwt")) {
+    hint = " ANON KEY tidak valid. Ambil ulang di Supabase Project Settings > API.";
+  } else if (lower.includes("failed to fetch") || lower.includes("network")) {
+    hint = " Koneksi ke Supabase gagal. Cek internet, firewall, atau status project (paused).";
+  } else if (lower.includes("permission denied") || lower.includes("row-level security") || lower.includes("rls")) {
+    hint = " Akses ditolak oleh RLS policy. Jalankan ulang supabase-schema.sql.";
+  } else if (lower.includes("duplicate key") || lower.includes("unique")) {
+    hint = " Kontak sudah terdaftar.";
+  }
+  return `${fallbackText}${hint}${rawMessage ? ` Detail: ${rawMessage}` : ""}`;
 }
 
 function saveSession() {
@@ -115,7 +139,7 @@ async function initializeCloud() {
     const supabaseLib = window.supabase;
     const config = getSupabaseConfig();
     if (!supabaseLib || !config.url || !config.anonKey) {
-      state.appError = "Konfigurasi Supabase belum terisi. Lengkapi file .env lalu jalankan via server lokal.";
+      state.appError = "Konfigurasi Supabase belum terbaca. Isi env.js (atau .env + npm start), lalu refresh browser.";
       return;
     }
     supabaseClient = supabaseLib.createClient(config.url, config.anonKey);
@@ -130,7 +154,7 @@ async function initializeCloud() {
     state.authTab = "login";
     await loadUserLogsFromCloud(activeUser.id);
   } catch (error) {
-    state.appError = "Gagal terhubung ke Supabase. Cek URL/ANON KEY dan tabel database.";
+    state.appError = getFriendlySupabaseError(error, "Gagal terhubung ke Supabase.");
     console.error("Inisialisasi cloud gagal:", error);
   }
 }
@@ -540,7 +564,7 @@ function bindEvents() {
     }
 
     if (!cloudReady) {
-      err.textContent = "Supabase belum siap. Lengkapi konfigurasi cloud terlebih dahulu.";
+      err.textContent = state.appError || "Supabase belum siap. Cek konfigurasi URL/key dan koneksi.";
       err.style.display = "block";
       return;
     }
@@ -551,7 +575,7 @@ function bindEvents() {
       .select("id,nama,kontak,password,pendamping,created_at")
       .single();
     if (error) {
-      err.textContent = error.message.includes("duplicate") ? "Akun dengan kontak ini sudah terdaftar." : "Gagal membuat akun.";
+      err.textContent = getFriendlySupabaseError(error, "Gagal membuat akun.");
       err.style.display = "block";
       return;
     }
@@ -570,7 +594,7 @@ function bindEvents() {
     err.style.display = "none";
 
     if (!cloudReady) {
-      err.textContent = "Supabase belum siap. Lengkapi konfigurasi cloud terlebih dahulu.";
+      err.textContent = state.appError || "Supabase belum siap. Cek konfigurasi URL/key dan koneksi.";
       err.style.display = "block";
       return;
     }
@@ -582,7 +606,7 @@ function bindEvents() {
       .limit(1)
       .maybeSingle();
     if (error) {
-      err.textContent = "Gagal login. Coba lagi.";
+      err.textContent = getFriendlySupabaseError(error, "Gagal login.");
       err.style.display = "block";
       return;
     }
